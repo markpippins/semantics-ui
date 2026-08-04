@@ -1,0 +1,6 @@
+{
+  "name": "Semantics Database Explorer",
+  "description": "Graph visualization, node editing, and semantics metadata management system supporting real-time filtering, append-only history, and light/dark/steel themes.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
