@@ -1,12 +1,54 @@
+import 'dotenv/config';
 import express from 'express';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import { createServer as createViteServer } from 'vite';
 
 const app = express();
-const PORT = 3000;
+
+// ── Runtime mode (read from .env or systemd Environment=) ───────────────
+//   SEMANTICS_UI_LIVE_MODE = 'true' → proxy all /api/* to SEMANTICS_SRV_URL
+//   Otherwise → serve the in-memory mock data in this server.ts (default).
+// Ports:
+//   mock mode runs on 3000 (matches Google AI Studio convention)
+//   live mode runs on 4213 (matches nexus/bin/start-nexus-uis.sh row)
+//   Both are overridable via the PORT env var for ad-hoc runs.
+const LIVE_MODE = process.env.SEMANTICS_UI_LIVE_MODE === 'true';
+const SEMANTICS_SRV_URL =
+  process.env.SEMANTICS_SRV_URL || 'http://localhost:3160';
+const DEFAULT_PORT = LIVE_MODE ? 4213 : 3000;
+const PORT = parseInt(process.env.PORT ?? String(DEFAULT_PORT), 10);
 
 app.use(express.json());
+
+// ── LIVE MODE: reverse-proxy /api/* to semantics-srv before mock routes ─
+// The real semantics-srv at SEMANTICS_SRV_URL implements the identical
+// /api/* REST surface this mock provides (/api/meta, /api/health,
+// /api/:table, /api/:table/:id, /api/drift_finding/:id/resolve), so the
+// React frontend's bare fetch('/api/...') calls work unchanged. JSON-only,
+// no SSE — a plain request-forwarding reverse proxy is sufficient.
+if (LIVE_MODE) {
+  app.all('/api/*', async (req, res) => {
+    // semantics-srv exposes its health check at /health (not /api/health);
+    // rewrite so the frontend's /api/health probe works identically in
+    // live and mock mode.
+    const target = new URL(req.originalUrl, SEMANTICS_SRV_URL);
+    if (target.pathname === '/api/health') {
+      target.pathname = '/health';
+    }
+    const upstream = await fetch(target, {
+      method: req.method,
+      headers: { 'content-type': 'application/json' },
+      body: ['GET', 'HEAD'].includes(req.method) ? undefined : JSON.stringify(req.body),
+    });
+    const text = await upstream.text();
+    res.status(upstream.status);
+    const ct = upstream.headers.get('content-type');
+    if (ct) res.setHeader('content-type', ct);
+    else res.setHeader('content-type', 'application/json');
+    res.send(text);
+  });
+}
 
 // Helper for generating UUIDs
 function randomUUID() {
@@ -1242,7 +1284,8 @@ async function startServer() {
   }
 
   app.listen(PORT, '0.0.0.0', () => {
-    console.log(`[semantics-srv] Server running on http://0.0.0.0:${PORT}`);
+    const mode = LIVE_MODE ? `LIVE (→ ${SEMANTICS_SRV_URL})` : 'MOCK';
+    console.log(`[semantics-ui] Server running on http://0.0.0.0:${PORT} [${mode}]`);
   });
 }
 
