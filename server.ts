@@ -1,48 +1,12 @@
-import 'dotenv/config';
 import express from 'express';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import { createServer as createViteServer } from 'vite';
 
 const app = express();
-
-// ── Runtime mode (read from .env or systemd Environment=) ───────────────
-//   SEMANTICS_UI_LIVE_MODE = 'true' → proxy all /api/* to SEMANTICS_SRV_URL
-//   Otherwise → serve the in-memory mock data in this server.ts (default).
-// Ports:
-//   mock mode runs on 3000 (matches Google AI Studio convention)
-//   live mode runs on 4213 (matches nexus/bin/start-nexus-uis.sh row)
-//   Both are overridable via the PORT env var for ad-hoc runs.
-const LIVE_MODE = process.env.SEMANTICS_UI_LIVE_MODE === 'true';
-const SEMANTICS_SRV_URL =
-  process.env.SEMANTICS_SRV_URL || 'http://localhost:3160';
-const DEFAULT_PORT = LIVE_MODE ? 4213 : 3000;
-const PORT = parseInt(process.env.PORT ?? String(DEFAULT_PORT), 10);
+const PORT = 3000;
 
 app.use(express.json());
-
-// ── LIVE MODE: reverse-proxy /api/* to semantics-srv before mock routes ─
-// The real semantics-srv at SEMANTICS_SRV_URL implements the identical
-// /api/* REST surface this mock provides (/api/meta, /api/health,
-// /api/:table, /api/:table/:id, /api/drift_finding/:id/resolve), so the
-// React frontend's bare fetch('/api/...') calls work unchanged. JSON-only,
-// no SSE — a plain request-forwarding reverse proxy is sufficient.
-if (LIVE_MODE) {
-  app.all('/api/*', async (req, res) => {
-    const target = new URL(req.originalUrl, SEMANTICS_SRV_URL);
-    const upstream = await fetch(target, {
-      method: req.method,
-      headers: { 'content-type': 'application/json' },
-      body: ['GET', 'HEAD'].includes(req.method) ? undefined : JSON.stringify(req.body),
-    });
-    const text = await upstream.text();
-    res.status(upstream.status);
-    const ct = upstream.headers.get('content-type');
-    if (ct) res.setHeader('content-type', ct);
-    else res.setHeader('content-type', 'application/json');
-    res.send(text);
-  });
-}
 
 // Helper for generating UUIDs
 function randomUUID() {
@@ -67,6 +31,9 @@ interface DbState {
   drift_finding: any[];
   concept_relationship: any[];
   relationship_type: any[];
+  evidence_type: any[];
+  evidence_item: any[];
+  statement_evidence: any[];
 }
 
 // Initial relationship types (31 active)
@@ -129,24 +96,127 @@ function seedDatabase(): DbState {
   ];
 
   const concept_relationship = [
-    { id: 'cr-301', from_concept_id: 'c-101', to_concept_id: 'c-102', relationship_type: 'produces', path: 'green', notes: 'User accounts originate payment transactions', evidence_source: 'Payment Spec v3.1', evidence_type: 'architecture_doc', confidence: 0.98, evidence_notes: 'Verified in API contract docs', expired_at: null },
-    { id: 'cr-302', from_concept_id: 'c-102', to_concept_id: 'c-105', relationship_type: 'transforms_into', path: 'green', notes: 'Settled payments transform into double-entry ledger items', evidence_source: 'Accounting Schema', evidence_type: 'code_analysis', confidence: 0.95, evidence_notes: 'Confirmed via ledger-worker codebase', expired_at: null },
-    { id: 'cr-303', from_concept_id: 'c-103', to_concept_id: 'c-101', relationship_type: 'governs', path: 'green', notes: 'Authorization policies restrict user account actions', evidence_source: 'IAM Policy Matrix', evidence_type: 'expert_judgment', confidence: 0.99, evidence_notes: 'Reviewed by Security Chief', expired_at: null },
-    { id: 'cr-304', from_concept_id: 'c-101', to_concept_id: 'c-106', relationship_type: 'spawns', path: 'green', notes: 'Successful authentication spawns identity tokens', evidence_source: 'OAuth2 Specs', evidence_type: 'standard_reference', confidence: 0.92, evidence_notes: 'RFC 6749 compliance', expired_at: null },
-    { id: 'cr-305', from_concept_id: 'c-102', to_concept_id: 'c-107', relationship_type: 'evidences', path: 'red', notes: 'Unflagged transaction patterns evidence potential risk scores', evidence_source: 'Risk Engine Logs', evidence_type: 'runtime_drift', confidence: 0.84, evidence_notes: 'Discovered during audit drift analysis', expired_at: null },
-    { id: 'cr-306', from_concept_id: 'c-106', to_concept_id: 'c-110', relationship_type: 'implements', path: 'green', notes: 'Identity token implements stateful user session', evidence_source: 'Session Middleware', evidence_type: 'code_analysis', confidence: 0.91, evidence_notes: 'Validated by dev team', expired_at: null },
-    { id: 'cr-307', from_concept_id: 'c-110', to_concept_id: 'c-108', relationship_type: 'emits', path: 'green', notes: 'Customer sessions emit audit log events', evidence_source: 'Telemetry Pipeline', evidence_type: 'event_schema', confidence: 0.97, evidence_notes: 'Built into base middleware', expired_at: null },
-    { id: 'cr-308', from_concept_id: 'c-104', to_concept_id: 'c-102', relationship_type: 'derives_from', path: 'green', notes: 'Order receipt derives item breakdown from transaction', evidence_source: 'Checkout API', evidence_type: 'architecture_doc', confidence: 0.96, evidence_notes: 'Match verified', expired_at: null },
-    { id: 'cr-309', from_concept_id: 'c-107', to_concept_id: 'c-103', relationship_type: 'constrains', path: 'red', notes: 'High risk scores dynamically constrain authorization policies', evidence_source: 'Adaptive Security Rules', evidence_type: 'experimental', confidence: 0.78, evidence_notes: 'Flagged for further validation', expired_at: null },
+    { id: 'cr-301', from_concept_id: 'c-101', to_concept_id: 'c-102', relationship_type: 'produces', path: 'green', notes: 'User accounts originate payment transactions', expired_at: null },
+    { id: 'cr-302', from_concept_id: 'c-102', to_concept_id: 'c-105', relationship_type: 'transforms_into', path: 'green', notes: 'Settled payments transform into double-entry ledger items', expired_at: null },
+    { id: 'cr-303', from_concept_id: 'c-103', to_concept_id: 'c-101', relationship_type: 'governs', path: 'green', notes: 'Authorization policies restrict user account actions', expired_at: null },
+    { id: 'cr-304', from_concept_id: 'c-101', to_concept_id: 'c-106', relationship_type: 'spawns', path: 'green', notes: 'Successful authentication spawns identity tokens', expired_at: null },
+    { id: 'cr-305', from_concept_id: 'c-102', to_concept_id: 'c-107', relationship_type: 'evidences', path: 'orange', notes: 'Unflagged transaction patterns evidence potential risk scores (under review)', expired_at: null },
+    { id: 'cr-306', from_concept_id: 'c-106', to_concept_id: 'c-110', relationship_type: 'implements', path: 'green', notes: 'Identity token implements stateful user session', expired_at: null },
+    { id: 'cr-307', from_concept_id: 'c-110', to_concept_id: 'c-108', relationship_type: 'emits', path: 'green', notes: 'Customer sessions emit audit log events', expired_at: null },
+    { id: 'cr-308', from_concept_id: 'c-104', to_concept_id: 'c-102', relationship_type: 'derives_from', path: 'green', notes: 'Order receipt derives item breakdown from transaction', expired_at: null },
+    { id: 'cr-309', from_concept_id: 'c-107', to_concept_id: 'c-103', relationship_type: 'constrains', path: 'red', notes: 'High risk scores dynamically constrain authorization policies', expired_at: null },
   ];
 
   const representation_relationship = [
-    { id: 'rr-401', from_representation_id: 'r-201', to_representation_id: 'r-203', relationship_type: 'writes', notes: 'Auth users trigger write events into pay_db.transactions', evidence_source: 'Transaction Controller', evidence_type: 'code_analysis', confidence: 0.95, evidence_notes: 'Direct SQL call chain', expired_at: null },
-    { id: 'rr-402', from_representation_id: 'r-203', to_representation_id: 'r-204', relationship_type: 'validates', notes: 'Payment transaction validates corresponding order row', evidence_source: 'Order Webhook', evidence_type: 'event_schema', confidence: 0.98, evidence_notes: 'Webhook response validation', expired_at: null },
-    { id: 'rr-403', from_representation_id: 'r-205', to_representation_id: 'r-201', relationship_type: 'equivalent', notes: 'User profile document maps 1:1 to auth_db users row', evidence_source: 'Sync Service', evidence_type: 'architecture_doc', confidence: 0.99, evidence_notes: 'CDC sync pipeline', expired_at: null },
-    { id: 'rr-404', from_representation_id: 'r-203', to_representation_id: 'r-208', relationship_type: 'calls', notes: 'Payment gateway calls fraud risk evaluation score table', evidence_source: 'Risk Client SDK', evidence_type: 'code_analysis', confidence: 0.88, evidence_notes: 'gRPC client call', expired_at: null },
-    { id: 'rr-405', from_representation_id: 'r-202', to_representation_id: 'r-207', relationship_type: 'emits', notes: 'Token invalidations emit compliance records', evidence_source: 'Auth Auditor', evidence_type: 'code_analysis', confidence: 0.94, evidence_notes: 'Security audit hook', expired_at: null },
-    { id: 'rr-406', from_representation_id: 'r-206', to_representation_id: 'r-207', relationship_type: 'projects', notes: 'Kafka telemetry projects compliance summaries to audit DB', evidence_source: 'Flink Processor', evidence_type: 'event_schema', confidence: 0.82, evidence_notes: 'Stream projection pipeline', expired_at: null },
+    { id: 'rr-401', from_representation_id: 'r-201', to_representation_id: 'r-203', relationship_type: 'writes', notes: 'Auth users trigger write events into pay_db.transactions', expired_at: null },
+    { id: 'rr-402', from_representation_id: 'r-203', to_representation_id: 'r-204', relationship_type: 'validates', notes: 'Payment transaction validates corresponding order row', expired_at: null },
+    { id: 'rr-403', from_representation_id: 'r-205', to_representation_id: 'r-201', relationship_type: 'equivalent', notes: 'User profile document maps 1:1 to auth_db users row', expired_at: null },
+    { id: 'rr-404', from_representation_id: 'r-203', to_representation_id: 'r-208', relationship_type: 'calls', notes: 'Payment gateway calls fraud risk evaluation score table', expired_at: null },
+    { id: 'rr-405', from_representation_id: 'r-202', to_representation_id: 'r-207', relationship_type: 'emits', notes: 'Token invalidations emit compliance records', expired_at: null },
+    { id: 'rr-406', from_representation_id: 'r-206', to_representation_id: 'r-207', relationship_type: 'projects', notes: 'Kafka telemetry projects compliance summaries to audit DB', expired_at: null },
+  ];
+
+  const evidence_type = [
+    { id: 'et-1001', name: 'agent_record', description: 'Telemetry or diagnostic record produced by automated agent', origin_category: 'telemetry', notes: 'Vocabulary term', created_at: nowISO, expired_at: null },
+    { id: 'et-1002', name: 'architecture_doc', description: 'System design or API architecture documentation reference', origin_category: 'documentation', notes: 'Vocabulary term', created_at: nowISO, expired_at: null },
+    { id: 'et-1003', name: 'code_analysis', description: 'Automated AST or static code analysis output', origin_category: 'code', notes: 'Vocabulary term', created_at: nowISO, expired_at: null },
+    { id: 'et-1004', name: 'event_schema', description: 'Schema declaration from event stream bus', origin_category: 'schema', notes: 'Vocabulary term', created_at: nowISO, expired_at: null },
+    { id: 'et-1005', name: 'standard_reference', description: 'RFC or industry standard specification reference', origin_category: 'standards', notes: 'Vocabulary term', created_at: nowISO, expired_at: null },
+  ];
+
+  const evidence_item = [
+    {
+      id: 'ei-2001',
+      evidence_type_id: 'et-1002',
+      uri: 'doc:payment-spec-v3.1',
+      excerpt: 'Payment Spec v3.1 section 4.2 defines checkout transaction creation',
+      note: 'Verified in API contract docs',
+      origin: 'harvested',
+      captured_at: Date.now() - 86400000,
+      source_hash: 'c61fe56f890a123b',
+      metadata: { version: '3.1', author: 'Fintech Architecture' },
+      valid_from: nowISO,
+      valid_to: null,
+      created_at: nowISO,
+      expired_at: null,
+    },
+    {
+      id: 'ei-2002',
+      evidence_type_id: 'et-1003',
+      uri: 'code:ledger-worker/src/processor.ts',
+      excerpt: 'Confirmed via ledger-worker codebase AST parse',
+      note: 'Double entry ledger transform function',
+      origin: 'harvested',
+      captured_at: Date.now() - 43200000,
+      source_hash: 'd82ae1234567890f',
+      metadata: { repo: 'ledger-worker', branch: 'main' },
+      valid_from: nowISO,
+      valid_to: null,
+      created_at: nowISO,
+      expired_at: null,
+    },
+    {
+      id: 'ei-2003',
+      evidence_type_id: 'et-1001',
+      uri: 'agent-record:cc1bcfce-9a32-4112-a1',
+      excerpt: 'T01 snapshot confirms payment transaction relationship claim',
+      note: 'Harvested via automated agent run',
+      origin: 'harvested',
+      captured_at: Date.now() - 3600000,
+      source_hash: 'a1b2c3d4e5f67890',
+      metadata: { runId: 'run-9981' },
+      valid_from: nowISO,
+      valid_to: null,
+      created_at: nowISO,
+      expired_at: null,
+    },
+  ];
+
+  const statement_evidence = [
+    {
+      id: 'se-3001',
+      evidence_item_id: 'ei-2001',
+      statement_type: 'concept_relationship',
+      statement_id: 'cr-301',
+      role: 'supports',
+      strength: 0.98,
+      comment: 'Payment Spec v3.1 confirms user accounts originate payment transactions',
+      created_at: nowISO,
+      expired_at: null,
+    },
+    {
+      id: 'se-3002',
+      evidence_item_id: 'ei-2003',
+      statement_type: 'concept_relationship',
+      statement_id: 'cr-301',
+      role: 'supports',
+      strength: 0.95,
+      comment: 'T01 agent telemetry confirms active call chain',
+      created_at: nowISO,
+      expired_at: null,
+    },
+    {
+      id: 'se-3003',
+      evidence_item_id: 'ei-2002',
+      statement_type: 'concept_relationship',
+      statement_id: 'cr-302',
+      role: 'supports',
+      strength: 0.95,
+      comment: 'Confirmed via ledger-worker codebase',
+      created_at: nowISO,
+      expired_at: null,
+    },
+    {
+      id: 'se-3004',
+      evidence_item_id: 'ei-2002',
+      statement_type: 'representation_relationship',
+      statement_id: 'rr-401',
+      role: 'supports',
+      strength: 0.92,
+      comment: 'Direct SQL call chain verified in transaction controller',
+      created_at: nowISO,
+      expired_at: null,
+    },
   ];
 
   const consumer_operation = [
@@ -195,6 +265,9 @@ function seedDatabase(): DbState {
     drift_finding: drift_findings,
     concept_relationship,
     relationship_type,
+    evidence_type,
+    evidence_item,
+    statement_evidence,
   };
 }
 
@@ -216,7 +289,7 @@ const WRITABLE_PARAMS: Record<string, { idType: string; idAuto: boolean; require
   },
   representation_relationship: {
     idType: 'uuid', idAuto: true, required: ['from_representation_id', 'to_representation_id', 'relationship_type'],
-    params: ['p_from_representation_id', 'p_to_representation_id', 'p_relationship_type', 'p_notes', 'p_evidence_source', 'p_evidence_type', 'p_confidence', 'p_evidence_notes', 'p_expired_at']
+    params: ['p_from_representation_id', 'p_to_representation_id', 'p_relationship_type', 'p_notes', 'p_expired_at']
   },
   consumer_operation: {
     idType: 'uuid', idAuto: true, required: ['representation_id', 'consumer_name', 'operation'],
@@ -244,11 +317,23 @@ const WRITABLE_PARAMS: Record<string, { idType: string; idAuto: boolean; require
   },
   concept_relationship: {
     idType: 'uuid', idAuto: true, required: ['from_concept_id', 'to_concept_id', 'relationship_type'],
-    params: ['p_from_concept_id', 'p_to_concept_id', 'p_relationship_type', 'p_path', 'p_notes', 'p_evidence_source', 'p_evidence_type', 'p_confidence', 'p_evidence_notes', 'p_expired_at']
+    params: ['p_from_concept_id', 'p_to_concept_id', 'p_relationship_type', 'p_path', 'p_notes', 'p_expired_at']
   },
   relationship_type: {
     idType: 'uuid', idAuto: true, required: ['name', 'description'],
     params: ['p_name', 'p_description', 'p_scope', 'p_notes', 'p_expired_at']
+  },
+  evidence_type: {
+    idType: 'uuid', idAuto: true, required: ['name', 'description'],
+    params: ['p_name', 'p_description', 'p_origin_category', 'p_notes', 'p_expired_at']
+  },
+  evidence_item: {
+    idType: 'uuid', idAuto: true, required: ['evidence_type_id'],
+    params: ['p_evidence_type_id', 'p_uri', 'p_excerpt', 'p_note', 'p_origin', 'p_captured_at', 'p_source_hash', 'p_metadata', 'p_valid_from', 'p_valid_to', 'p_expired_at']
+  },
+  statement_evidence: {
+    idType: 'uuid', idAuto: true, required: ['evidence_item_id', 'statement_type', 'statement_id', 'role'],
+    params: ['p_evidence_item_id', 'p_statement_type', 'p_statement_id', 'p_role', 'p_strength', 'p_comment', 'p_expired_at']
   },
 };
 
@@ -265,6 +350,9 @@ const TABLE_LABELS: Record<string, string> = {
   drift_finding: 'drift finding',
   concept_relationship: 'concept relationship',
   relationship_type: 'relationship type (vocabulary)',
+  evidence_type: 'evidence type (vocabulary of evidence kinds)',
+  evidence_item: 'evidence item (immutable, hash-deduplicated evidence record)',
+  statement_evidence: 'statement evidence (evidence linked to a relationship claim)',
 };
 
 // ------------------- API ENDPOINTS ------------------- //
@@ -312,6 +400,502 @@ app.get('/api/meta', (req, res) => {
     });
   } catch (err: any) {
     res.status(500).json({ error: 'meta_failed', message: err?.message || 'Meta query failed' });
+  }
+});
+
+// ------------------- EVIDENCE ENDPOINTS ------------------- //
+
+function toCamelCaseKey(key: string): string {
+  return key.replace(/_([a-z])/g, (_, letter) => letter.toUpperCase());
+}
+
+function objectToCamelCase(obj: any): any {
+  if (obj === null || typeof obj !== 'object') return obj;
+  if (Array.isArray(obj)) return obj.map(objectToCamelCase);
+  const result: Record<string, any> = {};
+  for (const [key, val] of Object.entries(obj)) {
+    const camelKey = toCamelCaseKey(key);
+    result[camelKey] = val;
+  }
+  return result;
+}
+
+function formatEvidenceItem(item: any) {
+  if (!item) return null;
+  const typeRow = db.evidence_type.find(t => t.id === item.evidence_type_id || t.name === item.evidence_type_id);
+  const typeName = typeRow ? typeRow.name : item.evidence_type_id;
+
+  return {
+    id: item.id,
+    evidenceTypeId: item.evidence_type_id,
+    evidenceType: typeName,
+    uri: item.uri || null,
+    excerpt: item.excerpt || null,
+    note: item.note || null,
+    origin: item.origin || null,
+    capturedAt: typeof item.captured_at === 'number' ? item.captured_at : (item.captured_at ? new Date(item.captured_at).getTime() : null),
+    sourceHash: item.source_hash || null,
+    metadata: item.metadata || null,
+    validFrom: item.valid_from || null,
+    validTo: item.valid_to || null,
+    createdAt: item.created_at || null,
+    expiredAt: item.expired_at || null,
+  };
+}
+
+// 1. Concept Relationship Evidence Join
+app.get('/api/concept-relationship/:id/evidence', (req, res) => {
+  try {
+    const relId = req.params.id;
+    const rel = db.concept_relationship.find(r => String(r.id) === relId && r.expired_at === null);
+    if (!rel) {
+      return res.status(404).json({ error: 'Concept relationship not found', message: `No active concept_relationship found with id '${relId}'.` });
+    }
+
+    const statementLinks = db.statement_evidence.filter(se => se.expired_at === null && se.statement_type === 'concept_relationship' && String(se.statement_id) === relId);
+
+    const evidenceList = statementLinks.map(se => {
+      const itemRow = db.evidence_item.find(ei => ei.id === se.evidence_item_id && ei.expired_at === null);
+      return {
+        statementEvidenceId: se.id,
+        role: se.role,
+        strength: se.strength !== undefined && se.strength !== null ? parseFloat(se.strength) : null,
+        comment: se.comment || null,
+        evidenceItem: itemRow ? formatEvidenceItem(itemRow) : null,
+      };
+    }).filter(e => e.evidenceItem !== null);
+
+    res.json({
+      relationship: {
+        id: rel.id,
+        fromConceptId: rel.from_concept_id,
+        toConceptId: rel.to_concept_id,
+        relationshipType: rel.relationship_type,
+        path: rel.path || null,
+        notes: rel.notes || null,
+      },
+      evidence: evidenceList,
+    });
+  } catch (err: any) {
+    res.status(500).json({ error: 'get_relationship_evidence_failed', message: err?.message || 'Failed to fetch evidence for concept relationship' });
+  }
+});
+
+// 2. Representation Relationship Evidence Join
+app.get('/api/representation-relationship/:id/evidence', (req, res) => {
+  try {
+    const relId = req.params.id;
+    const rel = db.representation_relationship.find(r => String(r.id) === relId && r.expired_at === null);
+    if (!rel) {
+      return res.status(404).json({ error: 'Representation relationship not found', message: `No active representation_relationship found with id '${relId}'.` });
+    }
+
+    const statementLinks = db.statement_evidence.filter(se => se.expired_at === null && se.statement_type === 'representation_relationship' && String(se.statement_id) === relId);
+
+    const evidenceList = statementLinks.map(se => {
+      const itemRow = db.evidence_item.find(ei => ei.id === se.evidence_item_id && ei.expired_at === null);
+      return {
+        statementEvidenceId: se.id,
+        role: se.role,
+        strength: se.strength !== undefined && se.strength !== null ? parseFloat(se.strength) : null,
+        comment: se.comment || null,
+        evidenceItem: itemRow ? formatEvidenceItem(itemRow) : null,
+      };
+    }).filter(e => e.evidenceItem !== null);
+
+    res.json({
+      relationship: {
+        id: rel.id,
+        fromRepresentationId: rel.from_representation_id,
+        toRepresentationId: rel.to_representation_id,
+        relationshipType: rel.relationship_type,
+        notes: rel.notes || null,
+      },
+      evidence: evidenceList,
+    });
+  } catch (err: any) {
+    res.status(500).json({ error: 'get_relationship_evidence_failed', message: err?.message || 'Failed to fetch evidence for representation relationship' });
+  }
+});
+
+// 3. Evidence Type Endpoints (idCol override on name)
+app.get('/api/evidence-type', (req, res) => {
+  try {
+    const includeExpired = req.query.includeExpired === 'true' || req.query.includeExpired === '1';
+    let limit = parseInt(req.query.limit as string) || 100;
+    let offset = parseInt(req.query.offset as string) || 0;
+
+    let rows = includeExpired ? db.evidence_type : db.evidence_type.filter(r => r.expired_at === null);
+    const total = rows.length;
+    const paginated = rows.slice(offset, offset + limit);
+
+    res.json({
+      items: paginated.map(objectToCamelCase),
+      total,
+      page: Math.floor(offset / limit) + 1,
+      pageSize: limit,
+      table: 'evidence_type',
+      count: total,
+    });
+  } catch (err: any) {
+    res.status(500).json({ error: 'list_failed', message: err?.message });
+  }
+});
+
+app.get('/api/evidence-type/:name', (req, res) => {
+  try {
+    const param = req.params.name;
+    const match = db.evidence_type.find(r => r.expired_at === null && (r.name === param || String(r.id) === param));
+    if (!match) {
+      return res.status(404).json({ error: 'not_found', message: `Evidence type '${param}' not found or is expired.` });
+    }
+    res.json(objectToCamelCase(match));
+  } catch (err: any) {
+    res.status(500).json({ error: 'get_failed', message: err?.message });
+  }
+});
+
+app.post('/api/evidence-type', (req, res) => {
+  try {
+    const body = req.body || {};
+    const name = body.p_name || body.name;
+    const description = body.p_description || body.description;
+    const originCategory = body.p_origin_category || body.origin_category || body.originCategory;
+    const notes = body.p_notes || body.notes;
+
+    if (!name || !description) {
+      return res.status(400).json({ error: 'add_failed', message: 'Required parameters name and description missing.' });
+    }
+
+    if (db.evidence_type.some(r => r.expired_at === null && r.name.toLowerCase() === name.toLowerCase())) {
+      return res.status(400).json({ error: 'duplicate_active_key', message: `Active evidence_type with name '${name}' already exists.` });
+    }
+
+    const newRow = {
+      id: randomUUID(),
+      name,
+      description,
+      origin_category: originCategory || null,
+      notes: notes || null,
+      created_at: new Date().toISOString(),
+      expired_at: null,
+    };
+
+    db.evidence_type.push(newRow);
+    res.status(201).json(objectToCamelCase(newRow));
+  } catch (err: any) {
+    res.status(400).json({ error: 'add_failed', message: err?.message });
+  }
+});
+
+app.patch('/api/evidence-type/:name', (req, res) => {
+  try {
+    const param = req.params.name;
+    const oldIndex = db.evidence_type.findIndex(r => r.expired_at === null && (r.name === param || String(r.id) === param));
+    if (oldIndex === -1) {
+      return res.status(404).json({ error: 'not_found', message: `Evidence type '${param}' not found or is expired.` });
+    }
+
+    const oldRow = db.evidence_type[oldIndex];
+    const body = req.body || {};
+    const newName = body.p_new_name || body.p_name || body.name || oldRow.name;
+    const description = body.p_description !== undefined ? body.p_description : (body.description !== undefined ? body.description : oldRow.description);
+    const originCategory = body.p_origin_category !== undefined ? body.p_origin_category : (body.origin_category !== undefined ? body.origin_category : oldRow.origin_category);
+    const notes = body.p_notes !== undefined ? body.p_notes : (body.notes !== undefined ? body.notes : oldRow.notes);
+
+    const newRow = {
+      ...oldRow,
+      id: randomUUID(),
+      name: newName,
+      description,
+      origin_category: originCategory,
+      notes,
+      created_at: new Date().toISOString(),
+      expired_at: null,
+    };
+
+    oldRow.expired_at = new Date().toISOString();
+    db.evidence_type.push(newRow);
+
+    res.json({
+      ...objectToCamelCase(newRow),
+      supersededId: oldRow.id,
+    });
+  } catch (err: any) {
+    res.status(400).json({ error: 'update_failed', message: err?.message });
+  }
+});
+
+app.delete('/api/evidence-type/:name', (req, res) => {
+  try {
+    const param = req.params.name;
+    const target = db.evidence_type.find(r => r.expired_at === null && (r.name === param || String(r.id) === param));
+    if (!target) {
+      return res.json({ table: 'evidence_type', id: param, deleted: 0 });
+    }
+    target.expired_at = new Date().toISOString();
+    res.json({ table: 'evidence_type', id: target.name, deleted: 1, expired: true });
+  } catch (err: any) {
+    res.status(500).json({ error: 'soft_delete_failed', message: err?.message });
+  }
+});
+
+// 4. Evidence Item Endpoints
+app.get('/api/evidence-item', (req, res) => {
+  try {
+    const includeExpired = req.query.includeExpired === 'true' || req.query.includeExpired === '1';
+    let limit = parseInt(req.query.limit as string) || 100;
+    let offset = parseInt(req.query.offset as string) || 0;
+
+    let rows = includeExpired ? db.evidence_item : db.evidence_item.filter(r => r.expired_at === null);
+
+    const typeFilter = (req.query.evidenceType || req.query.evidence_type || req.query.evidence_type_id) as string;
+    if (typeFilter) {
+      const typeMatch = db.evidence_type.find(t => t.name === typeFilter || t.id === typeFilter);
+      const targetTypeId = typeMatch ? typeMatch.id : typeFilter;
+      rows = rows.filter(r => r.evidence_type_id === targetTypeId || r.evidence_type_id === typeFilter);
+    }
+
+    if (req.query.origin) {
+      rows = rows.filter(r => r.origin === req.query.origin);
+    }
+
+    const uriFilter = (req.query.uri || req.query.uriPrefix) as string;
+    if (uriFilter) {
+      rows = rows.filter(r => r.uri && r.uri.startsWith(uriFilter));
+    }
+
+    const hashFilter = (req.query.sourceHash || req.query.source_hash) as string;
+    if (hashFilter) {
+      rows = rows.filter(r => r.source_hash === hashFilter);
+    }
+
+    const total = rows.length;
+    const paginated = rows.slice(offset, offset + limit);
+
+    res.json({
+      items: paginated.map(formatEvidenceItem),
+      total,
+      page: Math.floor(offset / limit) + 1,
+      pageSize: limit,
+    });
+  } catch (err: any) {
+    res.status(500).json({ error: 'list_failed', message: err?.message });
+  }
+});
+
+app.get('/api/evidence-item/:id', (req, res) => {
+  try {
+    const match = db.evidence_item.find(r => r.expired_at === null && String(r.id) === req.params.id);
+    if (!match) {
+      return res.status(404).json({ error: 'not_found', message: `Evidence item '${req.params.id}' not found or is expired.` });
+    }
+    res.json(formatEvidenceItem(match));
+  } catch (err: any) {
+    res.status(500).json({ error: 'get_failed', message: err?.message });
+  }
+});
+
+app.post('/api/evidence-item', (req, res) => {
+  try {
+    const body = req.body || {};
+    let typeId = body.p_evidence_type_id || body.evidence_type_id || body.evidenceTypeId || body.evidenceType;
+    if (typeId) {
+      const typeRow = db.evidence_type.find(t => t.name === typeId || t.id === typeId);
+      if (typeRow) typeId = typeRow.id;
+    }
+
+    if (!typeId) {
+      return res.status(400).json({ error: 'add_failed', message: 'Required parameter evidence_type_id missing.' });
+    }
+
+    const sourceHash = body.p_source_hash || body.source_hash || body.sourceHash || null;
+
+    if (sourceHash && db.evidence_item.some(r => r.expired_at === null && r.evidence_type_id === typeId && r.source_hash === sourceHash)) {
+      return res.status(400).json({ error: 'duplicate_evidence_item', message: 'An active evidence_item with this evidence_type_id and source_hash already exists.' });
+    }
+
+    const nowISO = new Date().toISOString();
+    const newRow = {
+      id: randomUUID(),
+      evidence_type_id: typeId,
+      uri: body.p_uri || body.uri || null,
+      excerpt: body.p_excerpt || body.excerpt || null,
+      note: body.p_note || body.note || null,
+      origin: body.p_origin || body.origin || 'harvested',
+      captured_at: body.p_captured_at || body.captured_at || body.capturedAt || Date.now(),
+      source_hash: sourceHash,
+      metadata: body.p_metadata || body.metadata || null,
+      valid_from: body.p_valid_from || body.valid_from || body.validFrom || nowISO,
+      valid_to: body.p_valid_to || body.valid_to || body.validTo || null,
+      created_at: nowISO,
+      expired_at: body.p_expired_at || body.expired_at || null,
+    };
+
+    db.evidence_item.push(newRow);
+    res.status(201).json(formatEvidenceItem(newRow));
+  } catch (err: any) {
+    res.status(400).json({ error: 'add_failed', message: err?.message });
+  }
+});
+
+app.patch('/api/evidence-item/:id', (req, res) => {
+  res.status(400).json({
+    error: 'immutable_entity',
+    message: 'evidence_item is immutable and cannot be updated. Create a new evidence_item row instead.'
+  });
+});
+
+app.delete('/api/evidence-item/:id', (req, res) => {
+  try {
+    const idParam = req.params.id;
+    const target = db.evidence_item.find(r => r.expired_at === null && String(r.id) === idParam);
+    if (!target) {
+      return res.json({ table: 'evidence_item', id: idParam, deleted: 0 });
+    }
+    const nowISO = new Date().toISOString();
+    target.expired_at = nowISO;
+    if (!target.valid_to) target.valid_to = nowISO;
+    res.json({ table: 'evidence_item', id: String(target.id), deleted: 1, expired: true });
+  } catch (err: any) {
+    res.status(500).json({ error: 'soft_delete_failed', message: err?.message });
+  }
+});
+
+// 5. Statement Evidence Endpoints
+app.get('/api/statement-evidence', (req, res) => {
+  try {
+    const includeExpired = req.query.includeExpired === 'true' || req.query.includeExpired === '1';
+    let limit = parseInt(req.query.limit as string) || 100;
+    let offset = parseInt(req.query.offset as string) || 0;
+
+    let rows = includeExpired ? db.statement_evidence : db.statement_evidence.filter(r => r.expired_at === null);
+
+    const stType = (req.query.statementType || req.query.statement_type) as string;
+    if (stType) {
+      rows = rows.filter(r => r.statement_type === stType);
+    }
+
+    const stId = (req.query.statementId || req.query.statement_id) as string;
+    if (stId) {
+      rows = rows.filter(r => String(r.statement_id) === stId);
+    }
+
+    const evItemId = (req.query.evidenceItemId || req.query.evidence_item_id) as string;
+    if (evItemId) {
+      rows = rows.filter(r => r.evidence_item_id === evItemId);
+    }
+
+    const total = rows.length;
+    const paginated = rows.slice(offset, offset + limit);
+
+    res.json({
+      items: paginated.map(objectToCamelCase),
+      total,
+      page: Math.floor(offset / limit) + 1,
+      pageSize: limit,
+    });
+  } catch (err: any) {
+    res.status(500).json({ error: 'list_failed', message: err?.message });
+  }
+});
+
+app.get('/api/statement-evidence/:id', (req, res) => {
+  try {
+    const match = db.statement_evidence.find(r => r.expired_at === null && String(r.id) === req.params.id);
+    if (!match) {
+      return res.status(404).json({ error: 'not_found', message: `Statement evidence '${req.params.id}' not found or is expired.` });
+    }
+    res.json(objectToCamelCase(match));
+  } catch (err: any) {
+    res.status(500).json({ error: 'get_failed', message: err?.message });
+  }
+});
+
+app.post('/api/statement-evidence', (req, res) => {
+  try {
+    const body = req.body || {};
+    const evidenceItemId = body.p_evidence_item_id || body.evidence_item_id || body.evidenceItemId;
+    const statementType = body.p_statement_type || body.statement_type || body.statementType;
+    const statementId = body.p_statement_id || body.statement_id || body.statementId;
+    const role = body.p_role || body.role;
+    const strength = body.p_strength !== undefined ? body.p_strength : body.strength;
+    const comment = body.p_comment !== undefined ? body.p_comment : body.comment;
+
+    if (!evidenceItemId || !statementType || !statementId || !role) {
+      return res.status(400).json({ error: 'add_failed', message: 'Required parameters evidence_item_id, statement_type, statement_id, role missing.' });
+    }
+
+    if (db.statement_evidence.some(r => r.expired_at === null && r.evidence_item_id === evidenceItemId && r.statement_type === statementType && String(r.statement_id) === String(statementId) && r.role === role)) {
+      return res.status(400).json({ error: 'duplicate_statement_evidence', message: 'A statement_evidence link already exists for this evidence_item_id, statement_type, statement_id, and role.' });
+    }
+
+    const newRow = {
+      id: randomUUID(),
+      evidence_item_id: evidenceItemId,
+      statement_type: statementType,
+      statement_id: String(statementId),
+      role,
+      strength: strength !== undefined && strength !== null ? parseFloat(strength) : 0.9,
+      comment: comment || null,
+      created_at: new Date().toISOString(),
+      expired_at: null,
+    };
+
+    db.statement_evidence.push(newRow);
+    res.status(201).json(objectToCamelCase(newRow));
+  } catch (err: any) {
+    res.status(400).json({ error: 'add_failed', message: err?.message });
+  }
+});
+
+app.patch('/api/statement-evidence/:id', (req, res) => {
+  try {
+    const idParam = req.params.id;
+    const oldIndex = db.statement_evidence.findIndex(r => r.expired_at === null && String(r.id) === idParam);
+    if (oldIndex === -1) {
+      return res.status(404).json({ error: 'not_found', message: `Statement evidence link '${idParam}' not found or is expired.` });
+    }
+
+    const oldRow = db.statement_evidence[oldIndex];
+    const body = req.body || {};
+    const role = body.p_role !== undefined ? body.p_role : (body.role !== undefined ? body.role : oldRow.role);
+    const strength = body.p_strength !== undefined ? body.p_strength : (body.strength !== undefined ? body.strength : oldRow.strength);
+    const comment = body.p_comment !== undefined ? body.p_comment : (body.comment !== undefined ? body.comment : oldRow.comment);
+
+    const newRow = {
+      ...oldRow,
+      id: randomUUID(),
+      role,
+      strength: strength !== undefined && strength !== null ? parseFloat(strength) : oldRow.strength,
+      comment,
+      created_at: new Date().toISOString(),
+      expired_at: null,
+    };
+
+    oldRow.expired_at = new Date().toISOString();
+    db.statement_evidence.push(newRow);
+
+    res.json({
+      ...objectToCamelCase(newRow),
+      supersededId: oldRow.id,
+    });
+  } catch (err: any) {
+    res.status(400).json({ error: 'update_failed', message: err?.message });
+  }
+});
+
+app.delete('/api/statement-evidence/:id', (req, res) => {
+  try {
+    const idParam = req.params.id;
+    const target = db.statement_evidence.find(r => r.expired_at === null && String(r.id) === idParam);
+    if (!target) {
+      return res.json({ table: 'statement_evidence', id: idParam, deleted: 0 });
+    }
+    target.expired_at = new Date().toISOString();
+    res.json({ table: 'statement_evidence', id: String(target.id), deleted: 1, expired: true });
+  } catch (err: any) {
+    res.status(500).json({ error: 'soft_delete_failed', message: err?.message });
   }
 });
 
@@ -428,6 +1012,23 @@ function checkNaturalKeyUniqueness(tableName: string, newRow: any, excludeId?: a
   }
   if (tableName === 'snapshot') {
     return activeRows.some(r => r.version === newRow.version);
+  }
+  if (tableName === 'evidence_type') {
+    return activeRows.some(r => r.name?.toLowerCase() === newRow.name?.toLowerCase());
+  }
+  if (tableName === 'evidence_item') {
+    if (newRow.evidence_type_id && newRow.source_hash) {
+      return activeRows.some(r => r.evidence_type_id === newRow.evidence_type_id && r.source_hash === newRow.source_hash);
+    }
+  }
+  if (tableName === 'statement_evidence') {
+    return activeRows.some(
+      r =>
+        r.evidence_item_id === newRow.evidence_item_id &&
+        r.statement_type === newRow.statement_type &&
+        String(r.statement_id) === String(newRow.statement_id) &&
+        r.role === newRow.role
+    );
   }
   return false;
 }
@@ -641,8 +1242,7 @@ async function startServer() {
   }
 
   app.listen(PORT, '0.0.0.0', () => {
-    const mode = LIVE_MODE ? `LIVE (→ ${SEMANTICS_SRV_URL})` : 'MOCK';
-    console.log(`[semantics-ui] Server running on http://0.0.0.0:${PORT} [${mode}]`);
+    console.log(`[semantics-srv] Server running on http://0.0.0.0:${PORT}`);
   });
 }
 

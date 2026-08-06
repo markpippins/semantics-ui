@@ -93,3 +93,42 @@ export async function resolveDriftFinding(
   });
   return handleResponse<{ id: string; resolved: number }>(res);
 }
+
+export async function fetchConceptRelationshipEvidence(id: string) {
+  const res = await fetch(`/api/concept-relationship/${encodeURIComponent(id)}/evidence`);
+  return handleResponse<import('../types').RelationshipEvidenceResponse>(res);
+}
+
+export async function fetchRepresentationRelationshipEvidence(id: string) {
+  const res = await fetch(`/api/representation-relationship/${encodeURIComponent(id)}/evidence`);
+  return handleResponse<import('../types').RelationshipEvidenceResponse>(res);
+}
+
+export async function fetchEvidenceItems(paramsObj: {
+  evidenceType?: string;
+  origin?: string;
+  sourceHash?: string;
+  uri?: string;
+  includeExpired?: boolean;
+  limit?: number;
+  offset?: number;
+}): Promise<{ items: import('../types').FormattedEvidenceItem[]; total: number; page: number; pageSize: number }> {
+  const query = new URLSearchParams();
+  if (paramsObj.evidenceType) query.set('evidenceType', paramsObj.evidenceType);
+  if (paramsObj.origin) query.set('origin', paramsObj.origin);
+  if (paramsObj.sourceHash) query.set('sourceHash', paramsObj.sourceHash);
+  if (paramsObj.uri) query.set('uri', paramsObj.uri);
+  if (paramsObj.includeExpired) query.set('includeExpired', 'true');
+  if (paramsObj.limit) query.set('limit', String(paramsObj.limit));
+  if (paramsObj.offset) query.set('offset', String(paramsObj.offset));
+
+  const res = await fetch(`/api/evidence-item?${query.toString()}`);
+  return handleResponse<{ items: import('../types').FormattedEvidenceItem[]; total: number; page: number; pageSize: number }>(res);
+}
+
+export async function fetchEvidenceTypes(includeExpired = false) {
+  const query = new URLSearchParams();
+  if (includeExpired) query.set('includeExpired', 'true');
+  const res = await fetch(`/api/evidence-type?${query.toString()}`);
+  return handleResponse<{ items: any[]; total: number }>(res);
+}

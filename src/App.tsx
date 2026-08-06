@@ -28,6 +28,7 @@ import { TableInspector } from './components/TableInspector';
 import { SnapshotsAndDrift } from './components/SnapshotsAndDrift';
 import { SchemaMetaViewer } from './components/SchemaMetaViewer';
 import { ApiSandbox } from './components/ApiSandbox';
+import { EvidenceExplorer } from './components/EvidenceExplorer';
 import { NodeEditModal } from './components/NodeEditModal';
 
 export function AppContent() {
@@ -252,6 +253,14 @@ export function AppContent() {
               onOpenEditModal={(row) => handleOpenEditModal(selectedTable, row)}
               onSoftDeleteRow={(id) => handleSoftDelete(selectedTable, id)}
               onRefresh={loadSelectedTableItems}
+            />
+          )}
+
+          {activeTab === 'evidence' && (
+            <EvidenceExplorer
+              onOpenCreateModal={(type) => handleOpenCreateModal('evidence_item', type ? { p_evidence_type_id: type } : {})}
+              onOpenEditModal={(item) => handleOpenEditModal('evidence_item', item)}
+              onRefreshGlobal={refreshAllData}
             />
           )}
 

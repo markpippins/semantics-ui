@@ -7,6 +7,7 @@ import {
   Layers,
   Code2,
   Terminal,
+  FileText,
   ChevronLeft,
   ChevronRight,
   Database,
@@ -41,6 +42,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
   const mainNavItems = [
     { id: 'graph' as ActiveTab, label: 'Graph Explorer', icon: Network, badge: 'Interactive' },
     { id: 'tables' as ActiveTab, label: 'Table Inspector', icon: Table, badge: `${tablesMeta.length} Tables` },
+    { id: 'evidence' as ActiveTab, label: 'Evidence Explorer', icon: FileText },
     { id: 'snapshots_drift' as ActiveTab, label: 'Snapshots & Drift', icon: Layers, countBadge: unresolvedDriftCount },
     { id: 'schema_meta' as ActiveTab, label: 'Schema Meta & Procs', icon: Code2 },
     { id: 'api_sandbox' as ActiveTab, label: 'API Sandbox', icon: Terminal },

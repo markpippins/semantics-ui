@@ -123,7 +123,7 @@ export interface ConceptRelationship {
   from_concept_id: string;
   to_concept_id: string;
   relationship_type: string;
-  path?: 'green' | 'red' | string | null;
+  path?: 'green' | 'red' | 'orange' | string | null;
   notes?: string;
   evidence_source?: string;
   evidence_type?: string;
@@ -145,6 +145,83 @@ export interface RelationshipType {
   superseded_id?: string;
 }
 
+export interface EvidenceType {
+  id: string;
+  name: string;
+  description: string;
+  origin_category?: string;
+  notes?: string;
+  created_at?: string;
+  expired_at: string | null;
+  superseded_id?: string;
+}
+
+export interface EvidenceItem {
+  id: string;
+  evidence_type_id: string;
+  uri?: string;
+  excerpt?: string;
+  note?: string;
+  origin?: string;
+  captured_at?: number | string;
+  source_hash?: string;
+  metadata?: Record<string, any>;
+  valid_from?: string;
+  valid_to?: string | null;
+  created_at?: string;
+  expired_at: string | null;
+}
+
+export interface StatementEvidence {
+  id: string;
+  evidence_item_id: string;
+  statement_type: 'concept_relationship' | 'representation_relationship' | string;
+  statement_id: string;
+  role: string;
+  strength?: number;
+  comment?: string;
+  created_at?: string;
+  expired_at: string | null;
+  superseded_id?: string;
+}
+
+export interface FormattedEvidenceItem {
+  id: string;
+  evidenceTypeId: string;
+  evidenceType: string;
+  uri: string | null;
+  excerpt: string | null;
+  note: string | null;
+  origin: string | null;
+  capturedAt: number | null;
+  sourceHash: string | null;
+  metadata: Record<string, any> | null;
+  validFrom: string | null;
+  validTo: string | null;
+  createdAt: string | null;
+  expiredAt: string | null;
+}
+
+export interface RelationshipEvidenceResponse {
+  relationship: {
+    id: string;
+    fromConceptId?: string;
+    toConceptId?: string;
+    fromRepresentationId?: string;
+    toRepresentationId?: string;
+    relationshipType: string;
+    path?: string;
+    notes?: string;
+  };
+  evidence: Array<{
+    statementEvidenceId: string;
+    role: string;
+    strength?: number | null;
+    comment?: string | null;
+    evidenceItem: FormattedEvidenceItem;
+  }>;
+}
+
 export type TableName =
   | 'owning_subsystem'
   | 'concept'
@@ -157,7 +234,10 @@ export type TableName =
   | 'snapshot_observation'
   | 'drift_finding'
   | 'concept_relationship'
-  | 'relationship_type';
+  | 'relationship_type'
+  | 'evidence_type'
+  | 'evidence_item'
+  | 'statement_evidence';
 
 export interface ListResponse<T> {
   table: string;
@@ -193,13 +273,14 @@ export interface FilterState {
   selectedRelType: string | 'all';
   includeExpired: boolean;
   minConfidence: number;
-  pathFilter: 'all' | 'green' | 'red';
+  pathFilter: 'all' | 'green' | 'red' | 'orange';
   driftSeverityFilter: 'all' | 'low' | 'medium' | 'high' | 'critical';
 }
 
 export type ActiveTab =
   | 'graph'
   | 'tables'
+  | 'evidence'
   | 'snapshots_drift'
   | 'schema_meta'
   | 'api_sandbox';

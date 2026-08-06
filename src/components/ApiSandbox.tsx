@@ -45,19 +45,21 @@ export const ApiSandbox: React.FC = () => {
 
   const presets = [
     { label: 'GET /api/meta', method: 'GET', path: '/api/meta', body: '' },
-    { label: 'GET /api/concept', method: 'GET', path: '/api/concept?limit=5', body: '' },
-    { label: 'GET /api/relationship_type', method: 'GET', path: '/api/relationship_type', body: '' },
+    { label: 'GET /api/evidence-type', method: 'GET', path: '/api/evidence-type', body: '' },
+    { label: 'GET /api/evidence-item', method: 'GET', path: '/api/evidence-item?origin=harvested', body: '' },
+    { label: 'GET /api/statement-evidence', method: 'GET', path: '/api/statement-evidence', body: '' },
+    { label: 'GET Concept Evidence', method: 'GET', path: '/api/concept-relationship/crel_1/evidence', body: '' },
     {
-      label: 'POST /api/concept (Add)',
+      label: 'POST /api/evidence-type',
       method: 'POST',
-      path: '/api/concept',
-      body: JSON.stringify({ p_name: 'Test Class', p_description: 'Added via REST Sandbox' }, null, 2),
+      path: '/api/evidence-type',
+      body: JSON.stringify({ p_name: 'git_commit', p_description: 'Git commit hash reference', p_origin_category: 'vcs' }, null, 2),
     },
     {
-      label: 'Duplicate Key Test (400)',
-      method: 'POST',
-      path: '/api/concept',
-      body: JSON.stringify({ p_name: 'User Account', p_description: 'Triggers duplicate_active_key' }, null, 2),
+      label: 'PATCH Evidence Item (Immutable 400 Test)',
+      method: 'PATCH',
+      path: '/api/evidence-item/eitem_1',
+      body: JSON.stringify({ p_note: 'Attempting edit' }, null, 2),
     },
   ];
 

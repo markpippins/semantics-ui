@@ -1,4 +1,6 @@
 import React, { useState, useEffect, useRef, useMemo } from 'react';
+import { select } from 'd3-selection';
+import { zoom as d3Zoom, zoomIdentity, ZoomBehavior } from 'd3-zoom';
 import {
   Concept,
   ConceptRelationship,
@@ -8,7 +10,12 @@ import {
   RepresentationRelationship,
   FilterState,
   RelationshipType,
+  RelationshipEvidenceResponse,
 } from '../types';
+import {
+  fetchConceptRelationshipEvidence,
+  fetchRepresentationRelationshipEvidence,
+} from '../services/api';
 import { useTheme } from '../context/ThemeContext';
 import {
   ZoomIn,
@@ -61,7 +68,7 @@ interface EdgePos {
   from: string;
   to: string;
   relType: string;
-  pathType?: 'green' | 'red' | string | null;
+  pathType?: 'green' | 'red' | 'orange' | string | null;
   confidence?: number;
   evidenceSource?: string;
   evidenceType?: string;
@@ -97,7 +104,100 @@ export const GraphVisualizer: React.FC<GraphVisualizerProps> = ({
   const [isPanning, setIsPanning] = useState<boolean>(false);
   const [startPanPos, setStartPanPos] = useState<{ x: number; y: number }>({ x: 0, y: 0 });
 
+  const [edgeEvidence, setEdgeEvidence] = useState<RelationshipEvidenceResponse['evidence'] | null>(null);
+  const [loadingEvidence, setLoadingEvidence] = useState(false);
+
+  useEffect(() => {
+    if (!selectedEdgeId) {
+      setEdgeEvidence(null);
+      return;
+    }
+
+    setLoadingEvidence(true);
+    const fetchEvidence = async () => {
+      try {
+        if (viewMode === 'concept') {
+          const res = await fetchConceptRelationshipEvidence(selectedEdgeId);
+          setEdgeEvidence(res.evidence || []);
+        } else {
+          const res = await fetchRepresentationRelationshipEvidence(selectedEdgeId);
+          setEdgeEvidence(res.evidence || []);
+        }
+      } catch {
+        setEdgeEvidence([]);
+      } finally {
+        setLoadingEvidence(false);
+      }
+    };
+
+    fetchEvidence();
+  }, [selectedEdgeId, viewMode]);
+
   const svgRef = useRef<SVGSVGElement>(null);
+  const zoomBehaviorRef = useRef<ZoomBehavior<SVGSVGElement, unknown> | null>(null);
+
+  // Attach d3-zoom behavior to the SVG container
+  useEffect(() => {
+    if (!svgRef.current) return;
+
+    const svg = select(svgRef.current);
+
+    const zoomBehavior = d3Zoom<SVGSVGElement, unknown>()
+      .scaleExtent([0.2, 4])
+      .filter((event) => {
+        if (event.type === 'wheel') return true;
+        const target = event.target as HTMLElement | SVGElement;
+        if (
+          target.closest &&
+          (target.closest('.group') ||
+            target.closest('button') ||
+            target.closest('select') ||
+            target.closest('input'))
+        ) {
+          return false;
+        }
+        return !event.button;
+      })
+      .on('zoom', (event) => {
+        setPan({ x: event.transform.x, y: event.transform.y });
+        setZoom(event.transform.k);
+      });
+
+    zoomBehaviorRef.current = zoomBehavior;
+    svg.call(zoomBehavior);
+
+    return () => {
+      svg.on('.zoom', null);
+    };
+  }, []);
+
+  // Handle Dragging Nodes on Canvas via window events
+  useEffect(() => {
+    if (!draggedNodeId) return;
+
+    const handleMouseMove = (e: MouseEvent) => {
+      if (svgRef.current) {
+        const rect = svgRef.current.getBoundingClientRect();
+        const mouseX = (e.clientX - rect.left - pan.x) / zoom;
+        const mouseY = (e.clientY - rect.top - pan.y) / zoom;
+        setCustomNodePositions((prev) => ({
+          ...prev,
+          [draggedNodeId]: { x: mouseX, y: mouseY },
+        }));
+      }
+    };
+
+    const handleMouseUp = () => {
+      setDraggedNodeId(null);
+    };
+
+    window.addEventListener('mousemove', handleMouseMove);
+    window.addEventListener('mouseup', handleMouseUp);
+    return () => {
+      window.removeEventListener('mousemove', handleMouseMove);
+      window.removeEventListener('mouseup', handleMouseUp);
+    };
+  }, [draggedNodeId, pan, zoom]);
 
   // Map subsystem IDs to colors for visual grouping
   const subsystemColors = useMemo(() => {
@@ -320,6 +420,22 @@ export const GraphVisualizer: React.FC<GraphVisualizerProps> = ({
     return edges.find((e) => e.id === selectedEdgeId) || null;
   }, [edges, selectedEdgeId]);
 
+  // Dynamic Canvas Bounds so graph elements exceeding initial viewport remain fully scrollable & accessible
+  const canvasBounds = useMemo(() => {
+    let maxX = 1200;
+    let maxY = 800;
+
+    for (const n of nodes) {
+      if (n.x + 200 > maxX) maxX = n.x + 200;
+      if (n.y + 150 > maxY) maxY = n.y + 150;
+    }
+
+    return {
+      width: Math.max(2200, Math.ceil(maxX + 300)),
+      height: Math.max(1600, Math.ceil(maxY + 300)),
+    };
+  }, [nodes]);
+
   // Handle Dragging Nodes on Canvas
   const handleMouseDownNode = (e: React.MouseEvent, id: string) => {
     e.stopPropagation();
@@ -351,7 +467,9 @@ export const GraphVisualizer: React.FC<GraphVisualizerProps> = ({
   };
 
   const handleStartPan = (e: React.MouseEvent) => {
-    if (e.target === svgRef.current || (e.target as HTMLElement).tagName === 'svg') {
+    const target = e.target as HTMLElement | SVGElement;
+    const isInteractive = target.closest('.group') || target.closest('button') || target.closest('select') || target.closest('input');
+    if (!isInteractive) {
       setIsPanning(true);
       setStartPanPos({ x: e.clientX - pan.x, y: e.clientY - pan.y });
       setSelectedNodeId(null);
@@ -359,10 +477,32 @@ export const GraphVisualizer: React.FC<GraphVisualizerProps> = ({
     }
   };
 
+  const handleZoomIn = () => {
+    if (svgRef.current && zoomBehaviorRef.current) {
+      select(svgRef.current).call(zoomBehaviorRef.current.scaleBy, 1.25);
+    } else {
+      setZoom((z) => Math.min(4, z * 1.25));
+    }
+  };
+
+  const handleZoomOut = () => {
+    if (svgRef.current && zoomBehaviorRef.current) {
+      select(svgRef.current).call(zoomBehaviorRef.current.scaleBy, 0.8);
+    } else {
+      setZoom((z) => Math.max(0.2, z * 0.8));
+    }
+  };
+
   const handleResetView = () => {
-    setZoom(1);
-    setPan({ x: 0, y: 0 });
+    if (svgRef.current && zoomBehaviorRef.current) {
+      select(svgRef.current).call(zoomBehaviorRef.current.transform, zoomIdentity);
+    } else {
+      setZoom(1);
+      setPan({ x: 0, y: 0 });
+    }
     setCustomNodePositions({});
+    setSelectedNodeId(null);
+    setSelectedEdgeId(null);
   };
 
   return (
@@ -483,6 +623,14 @@ export const GraphVisualizer: React.FC<GraphVisualizerProps> = ({
                 >
                   Red
                 </button>
+                <button
+                  onClick={() => onFilterChange({ pathFilter: 'orange' })}
+                  className={`px-2 py-0.5 text-[11px] rounded-xs font-medium ${
+                    filterState.pathFilter === 'orange' ? 'bg-amber-600 text-white' : 'text-amber-400'
+                  }`}
+                >
+                  Orange
+                </button>
               </div>
             </div>
           )}
@@ -519,14 +667,14 @@ export const GraphVisualizer: React.FC<GraphVisualizerProps> = ({
         {/* Canvas Zoom Controls */}
         <div className="flex items-center gap-1">
           <button
-            onClick={() => setZoom((z) => Math.min(2.5, z + 0.15))}
+            onClick={handleZoomIn}
             className={`p-1.5 rounded-md border ${borderClass} hover:bg-black/5 dark:hover:bg-white/5 ${textSecondaryClass}`}
             title="Zoom In"
           >
             <ZoomIn className="w-4 h-4" />
           </button>
           <button
-            onClick={() => setZoom((z) => Math.max(0.4, z - 0.15))}
+            onClick={handleZoomOut}
             className={`p-1.5 rounded-md border ${borderClass} hover:bg-black/5 dark:hover:bg-white/5 ${textSecondaryClass}`}
             title="Zoom Out"
           >
@@ -544,30 +692,34 @@ export const GraphVisualizer: React.FC<GraphVisualizerProps> = ({
 
       {/* Main Interactive SVG Canvas Area */}
       <div
-        className="flex-1 w-full h-full relative bg-radial from-slate-900/50 to-slate-950/90 overflow-hidden cursor-grab active:cursor-grabbing"
+        className="flex-1 w-full h-full relative bg-radial from-slate-900/50 to-slate-950/90 overflow-auto cursor-grab active:cursor-grabbing"
         onMouseDown={handleStartPan}
         onMouseMove={handleMouseMoveCanvas}
         onMouseUp={handleMouseUpCanvas}
       >
-        {/* Subtle Canvas Grid Background */}
-        <svg className="absolute inset-0 w-full h-full pointer-events-none opacity-15">
-          <defs>
-            <pattern id="grid" width="30" height="30" patternUnits="userSpaceOnUse">
-              <path d="M 30 0 L 0 0 0 30" fill="none" stroke="currentColor" strokeWidth="0.5" className="text-zinc-500" />
-            </pattern>
-          </defs>
-          <rect width="100%" height="100%" fill="url(#grid)" />
-        </svg>
-
-        {/* Interactive Graph SVG Elements */}
-        <svg
-          ref={svgRef}
-          className="w-full h-full"
+        <div
+          className="relative min-w-full min-h-full"
           style={{
-            transform: `translate(${pan.x}px, ${pan.y}px) scale(${zoom})`,
-            transformOrigin: '0 0',
+            width: `${canvasBounds.width}px`,
+            height: `${canvasBounds.height}px`,
           }}
         >
+          {/* Subtle Canvas Grid Background */}
+          <svg className="absolute inset-0 w-full h-full pointer-events-none opacity-15">
+            <defs>
+              <pattern id="grid" width="30" height="30" patternUnits="userSpaceOnUse">
+                <path d="M 30 0 L 0 0 0 30" fill="none" stroke="currentColor" strokeWidth="0.5" className="text-zinc-500" />
+              </pattern>
+            </defs>
+            <rect width="100%" height="100%" fill="url(#grid)" />
+          </svg>
+
+          {/* Interactive Graph SVG Elements */}
+          <svg
+            ref={svgRef}
+            className="w-full h-full absolute inset-0"
+            style={{ overflow: 'visible' }}
+          >
           <defs>
             {/* Directional Arrow Markers for Edges */}
             <marker id="arrow-sky" viewBox="0 0 10 10" refX="24" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
@@ -579,149 +731,159 @@ export const GraphVisualizer: React.FC<GraphVisualizerProps> = ({
             <marker id="arrow-rose" viewBox="0 0 10 10" refX="24" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
               <path d="M 0 0 L 10 5 L 0 10 z" fill="#f43f5e" />
             </marker>
+            <marker id="arrow-amber" viewBox="0 0 10 10" refX="24" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+              <path d="M 0 0 L 10 5 L 0 10 z" fill="#f59e0b" />
+            </marker>
           </defs>
 
-          {/* Render Relationship Edges */}
-          {edges.map((edge) => {
-            const isSelected = selectedEdgeId === edge.id;
-            const isNodeSelected = selectedNodeId === edge.from || selectedNodeId === edge.to;
+          {/* Transformed Canvas Scene Group */}
+          <g transform={`translate(${pan.x}px, ${pan.y}px) scale(${zoom})`}>
+            {/* Render Relationship Edges */}
+            {edges.map((edge) => {
+              const isSelected = selectedEdgeId === edge.id;
+              const isNodeSelected = selectedNodeId === edge.from || selectedNodeId === edge.to;
 
-            // Curve calculation between nodes
-            const dx = edge.toPos.x - edge.fromPos.x;
-            const dy = edge.toPos.y - edge.fromPos.y;
-            const midX = (edge.fromPos.x + edge.toPos.x) / 2;
-            const midY = (edge.fromPos.y + edge.toPos.y) / 2 - 25; // Slight arch
+              // Curve calculation between nodes
+              const dx = edge.toPos.x - edge.fromPos.x;
+              const dy = edge.toPos.y - edge.fromPos.y;
+              const midX = (edge.fromPos.x + edge.toPos.x) / 2;
+              const midY = (edge.fromPos.y + edge.toPos.y) / 2 - 25; // Slight arch
 
-            // Color selection based on path status or confidence
-            let strokeColor = '#38bdf8'; // sky
-            let markerId = 'arrow-sky';
+              // Color selection based on path status or confidence
+              let strokeColor = '#38bdf8'; // sky
+              let markerId = 'arrow-sky';
 
-            if (edge.pathType === 'green') {
-              strokeColor = '#10b981'; // emerald
-              markerId = 'arrow-emerald';
-            } else if (edge.pathType === 'red') {
-              strokeColor = '#f43f5e'; // rose
-              markerId = 'arrow-rose';
-            }
+              if (edge.pathType === 'green') {
+                strokeColor = '#10b981'; // emerald
+                markerId = 'arrow-emerald';
+              } else if (edge.pathType === 'red') {
+                strokeColor = '#f43f5e'; // rose
+                markerId = 'arrow-rose';
+              } else if (edge.pathType === 'orange') {
+                strokeColor = '#f59e0b'; // amber / orange
+                markerId = 'arrow-amber';
+              }
 
-            return (
-              <g key={edge.id} className="cursor-pointer group" onClick={() => setSelectedEdgeId(edge.id)}>
-                {/* Curve path line */}
-                <path
-                  d={`M ${edge.fromPos.x} ${edge.fromPos.y} Q ${midX} ${midY} ${edge.toPos.x} ${edge.toPos.y}`}
-                  fill="none"
-                  stroke={strokeColor}
-                  strokeWidth={isSelected || isNodeSelected ? 3 : 1.5}
-                  strokeDasharray={edge.isExpired ? '4,4' : undefined}
-                  opacity={edge.isExpired ? 0.4 : isNodeSelected || isSelected ? 1 : 0.75}
-                  markerEnd={`url(#${markerId})`}
-                  className="transition-all hover:opacity-100 hover:stroke-width-2"
-                />
-
-                {/* Edge Label Tag pill in middle */}
-                <g transform={`translate(${midX}, ${midY})`}>
-                  <rect
-                    x="-45"
-                    y="-11"
-                    width="90"
-                    height="22"
-                    rx="11"
-                    fill="#0f172a"
+              return (
+                <g key={edge.id} className="cursor-pointer group" onClick={() => setSelectedEdgeId(edge.id)}>
+                  {/* Curve path line */}
+                  <path
+                    d={`M ${edge.fromPos.x} ${edge.fromPos.y} Q ${midX} ${midY} ${edge.toPos.x} ${edge.toPos.y}`}
+                    fill="none"
                     stroke={strokeColor}
-                    strokeWidth="1"
-                    opacity="0.9"
+                    strokeWidth={isSelected || isNodeSelected ? 3 : 1.5}
+                    strokeDasharray={edge.isExpired ? '4,4' : undefined}
+                    opacity={edge.isExpired ? 0.4 : isNodeSelected || isSelected ? 1 : 0.75}
+                    markerEnd={`url(#${markerId})`}
+                    className="transition-all hover:opacity-100 hover:stroke-width-2"
                   />
-                  <text
-                    x="0"
-                    y="3"
-                    textAnchor="middle"
-                    fill="#e2e8f0"
-                    fontSize="10"
-                    fontFamily="monospace"
-                    fontWeight="600"
-                  >
-                    {edge.relType}
-                  </text>
-                  {edge.confidence !== undefined && (
-                    <circle cx="36" cy="0" r="4" fill={edge.confidence >= 0.9 ? '#10b981' : '#f59e0b'} />
-                  )}
+
+                  {/* Edge Label Tag pill in middle */}
+                  <g transform={`translate(${midX}, ${midY})`}>
+                    <rect
+                      x="-45"
+                      y="-11"
+                      width="90"
+                      height="22"
+                      rx="11"
+                      fill="#0f172a"
+                      stroke={strokeColor}
+                      strokeWidth="1"
+                      opacity="0.9"
+                    />
+                    <text
+                      x="0"
+                      y="3"
+                      textAnchor="middle"
+                      fill="#e2e8f0"
+                      fontSize="10"
+                      fontFamily="monospace"
+                      fontWeight="600"
+                    >
+                      {edge.relType}
+                    </text>
+                    {edge.confidence !== undefined && (
+                      <circle cx="36" cy="0" r="4" fill={edge.confidence >= 0.9 ? '#10b981' : '#f59e0b'} />
+                    )}
+                  </g>
                 </g>
-              </g>
-            );
-          })}
+              );
+            })}
 
-          {/* Render Graph Nodes */}
-          {nodes.map((node) => {
-            const isSelected = selectedNodeId === node.id;
-            const subColor = node.subsystemId !== undefined ? subsystemColors[node.subsystemId] : null;
+            {/* Render Graph Nodes */}
+            {nodes.map((node) => {
+              const isSelected = selectedNodeId === node.id;
+              const subColor = node.subsystemId !== undefined ? subsystemColors[node.subsystemId] : null;
 
-            return (
-              <g
-                key={node.id}
-                transform={`translate(${node.x}, ${node.y})`}
-                onMouseDown={(e) => handleMouseDownNode(e, node.id)}
-                className="cursor-grab active:cursor-grabbing group"
-              >
-                {/* Node Box / Card Container */}
-                <rect
-                  x="-85"
-                  y="-32"
-                  width="170"
-                  height="64"
-                  rx="10"
-                  fill={isSelected ? '#1e293b' : '#0f172a'}
-                  stroke={isSelected ? '#38bdf8' : subColor ? subColor.stroke : '#475569'}
-                  strokeWidth={isSelected ? 2.5 : 1.5}
-                  opacity={node.isExpired ? 0.5 : 0.95}
-                  className="shadow-xl transition-all"
-                />
-
-                {/* Subsystem Color Accent Top Pill */}
-                {node.subsystemName && (
+              return (
+                <g
+                  key={node.id}
+                  transform={`translate(${node.x}, ${node.y})`}
+                  onMouseDown={(e) => handleMouseDownNode(e, node.id)}
+                  className="cursor-grab active:cursor-grabbing group"
+                >
+                  {/* Node Box / Card Container */}
                   <rect
                     x="-85"
                     y="-32"
                     width="170"
-                    height="4"
-                    rx="2"
-                    fill={subColor?.stroke || '#0ea5e9'}
+                    height="64"
+                    rx="10"
+                    fill={isSelected ? '#1e293b' : '#0f172a'}
+                    stroke={isSelected ? '#38bdf8' : subColor ? subColor.stroke : '#475569'}
+                    strokeWidth={isSelected ? 2.5 : 1.5}
+                    opacity={node.isExpired ? 0.5 : 0.95}
+                    className="shadow-xl transition-all"
                   />
-                )}
 
-                {/* Node Label Text */}
-                <text
-                  x="0"
-                  y="-10"
-                  textAnchor="middle"
-                  fill="#f8fafc"
-                  fontSize="12"
-                  fontWeight="600"
-                  className={node.isExpired ? 'line-through opacity-70' : ''}
-                >
-                  {node.label.length > 20 ? `${node.label.slice(0, 18)}...` : node.label}
-                </text>
-
-                {/* Subtitle / Subsystem Tag */}
-                <text x="0" y="8" textAnchor="middle" fill="#94a3b8" fontSize="10" fontFamily="monospace">
-                  {node.subtitle ? (node.subtitle.length > 22 ? `${node.subtitle.slice(0, 20)}...` : node.subtitle) : node.type}
-                </text>
-
-                {/* Expired / Active Status Badge */}
-                <g transform="translate(0, 20)">
-                  {node.isExpired ? (
-                    <text x="0" y="0" textAnchor="middle" fill="#f43f5e" fontSize="9" fontWeight="bold">
-                      EXPIRED
-                    </text>
-                  ) : (
-                    <text x="0" y="0" textAnchor="middle" fill="#38bdf8" fontSize="9" fontWeight="bold">
-                      {node.subsystemName || node.type.toUpperCase()}
-                    </text>
+                  {/* Subsystem Color Accent Top Pill */}
+                  {node.subsystemName && (
+                    <rect
+                      x="-85"
+                      y="-32"
+                      width="170"
+                      height="4"
+                      rx="2"
+                      fill={subColor?.stroke || '#0ea5e9'}
+                    />
                   )}
+
+                  {/* Node Label Text */}
+                  <text
+                    x="0"
+                    y="-10"
+                    textAnchor="middle"
+                    fill="#f8fafc"
+                    fontSize="12"
+                    fontWeight="600"
+                    className={node.isExpired ? 'line-through opacity-70' : ''}
+                  >
+                    {node.label.length > 20 ? `${node.label.slice(0, 18)}...` : node.label}
+                  </text>
+
+                  {/* Subtitle / Subsystem Tag */}
+                  <text x="0" y="8" textAnchor="middle" fill="#94a3b8" fontSize="10" fontFamily="monospace">
+                    {node.subtitle ? (node.subtitle.length > 22 ? `${node.subtitle.slice(0, 20)}...` : node.subtitle) : node.type}
+                  </text>
+
+                  {/* Expired / Active Status Badge */}
+                  <g transform="translate(0, 20)">
+                    {node.isExpired ? (
+                      <text x="0" y="0" textAnchor="middle" fill="#f43f5e" fontSize="9" fontWeight="bold">
+                        EXPIRED
+                      </text>
+                    ) : (
+                      <text x="0" y="0" textAnchor="middle" fill="#38bdf8" fontSize="9" fontWeight="bold">
+                        {node.subsystemName || node.type.toUpperCase()}
+                      </text>
+                    )}
+                  </g>
                 </g>
-              </g>
-            );
-          })}
+              );
+            })}
+          </g>
         </svg>
+        </div>
 
         {/* Empty Canvas Prompt if no items match filters */}
         {nodes.length === 0 && (
@@ -887,19 +1049,75 @@ export const GraphVisualizer: React.FC<GraphVisualizerProps> = ({
               </div>
             )}
 
-            {selectedEdge.evidenceSource && (
-              <div className="p-2 rounded-md bg-black/10 dark:bg-white/5 border border-zinc-700/40">
-                <span className={textSecondaryClass}>Evidence Source:</span>
-                <div className="font-mono text-zinc-200 mt-0.5">{selectedEdge.evidenceSource}</div>
+            {/* Evidence items supporting this claim */}
+            <div className="pt-2 border-t border-zinc-700/50 space-y-2">
+              <div className="flex items-center justify-between text-xs font-semibold text-zinc-300">
+                <span className="flex items-center gap-1.5">
+                  <ShieldCheck className="w-3.5 h-3.5 text-emerald-400" />
+                  Supporting Evidence Claims
+                </span>
+                {edgeEvidence && (
+                  <span className="text-[10px] font-mono text-zinc-400">({edgeEvidence.length})</span>
+                )}
               </div>
-            )}
 
-            {selectedEdge.evidenceNotes && (
-              <div className="p-2 rounded-md bg-black/10 dark:bg-white/5 border border-zinc-700/40">
-                <span className={textSecondaryClass}>Evidence Notes:</span>
-                <p className="text-zinc-300 mt-0.5 text-[11px]">{selectedEdge.evidenceNotes}</p>
-              </div>
-            )}
+              {loadingEvidence && (
+                <div className="text-[11px] text-zinc-400 font-mono py-2 animate-pulse">
+                  Loading relationship evidence claims...
+                </div>
+              )}
+
+              {!loadingEvidence && edgeEvidence && edgeEvidence.length === 0 && (
+                <div className="text-[11px] text-zinc-500 italic py-1">
+                  No linked evidence claims found.
+                </div>
+              )}
+
+              {!loadingEvidence && edgeEvidence && edgeEvidence.length > 0 && (
+                <div className="space-y-2 max-h-52 overflow-y-auto pr-1">
+                  {edgeEvidence.map((ev) => (
+                    <div
+                      key={ev.statementEvidenceId}
+                      className="p-2 rounded-lg bg-black/20 dark:bg-white/5 border border-zinc-700/50 space-y-1 text-[11px]"
+                    >
+                      <div className="flex items-center justify-between">
+                        <span className="px-1.5 py-0.5 rounded-xs text-[9px] font-bold uppercase bg-indigo-500/20 text-indigo-300 border border-indigo-500/30">
+                          {ev.role}
+                        </span>
+                        {ev.strength !== null && ev.strength !== undefined && (
+                          <span className="text-[10px] font-mono text-emerald-400 font-semibold">
+                            {Math.round(ev.strength * 100)}% strength
+                          </span>
+                        )}
+                      </div>
+
+                      {ev.comment && (
+                        <p className="text-zinc-300 text-[11px] leading-tight mt-0.5">{ev.comment}</p>
+                      )}
+
+                      {ev.evidenceItem && (
+                        <div className="mt-1 pt-1 border-t border-zinc-700/30 text-[10px] text-zinc-400 space-y-0.5 font-mono">
+                          <div className="flex items-center justify-between">
+                            <span className="text-sky-400 font-semibold">{ev.evidenceItem.evidenceType}</span>
+                            <span className="text-zinc-500 text-[9px]">{ev.evidenceItem.origin}</span>
+                          </div>
+                          {ev.evidenceItem.uri && (
+                            <div className="truncate text-zinc-300 bg-black/30 p-1 rounded-xs font-mono">
+                              {ev.evidenceItem.uri}
+                            </div>
+                          )}
+                          {ev.evidenceItem.excerpt && (
+                            <div className="text-zinc-400 italic font-sans text-[10px] line-clamp-2 mt-0.5">
+                              "{ev.evidenceItem.excerpt}"
+                            </div>
+                          )}
+                        </div>
+                      )}
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
           </div>
         </div>
       )}

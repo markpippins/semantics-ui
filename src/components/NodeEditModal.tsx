@@ -217,6 +217,7 @@ export const NodeEditModal: React.FC<NodeEditModalProps> = ({
         >
           <option value="">None / Default</option>
           <option value="green">Green Path (Validated / Active)</option>
+          <option value="orange">Orange Path (Warning / Review)</option>
           <option value="red">Red Path (Drift / Flagged)</option>
         </select>
       );
