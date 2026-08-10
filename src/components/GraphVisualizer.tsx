@@ -737,7 +737,7 @@ export const GraphVisualizer: React.FC<GraphVisualizerProps> = ({
           </defs>
 
           {/* Transformed Canvas Scene Group */}
-          <g transform={`translate(${pan.x}, ${pan.y}) scale(${zoom})`}>
+          <g transform={`translate(${pan.x}px, ${pan.y}px) scale(${zoom})`}>
             {/* Render Relationship Edges */}
             {edges.map((edge) => {
               const isSelected = selectedEdgeId === edge.id;
