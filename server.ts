@@ -355,9 +355,59 @@ const TABLE_LABELS: Record<string, string> = {
   statement_evidence: 'statement evidence (evidence linked to a relationship claim)',
 };
 
+// ─────────────────────────────────────────────────────────────────────────────
+//  LIVE MODE — proxy /api/* to the real semantics-srv (:3160)
+//
+//  SEMANTICS_UI_LIVE_MODE=true (the installed unit default) makes the UI a
+//  thin client over the real backend: every /api/* request is forwarded to
+//  SEMANTICS_SRV_URL and health reports the upstream's status. The in-process
+//  seed server below is ONLY mounted when live mode is NOT selected (explicit
+//  mock), so a failed live request can never fall back to seeded rows.
+// ─────────────────────────────────────────────────────────────────────────────
+const LIVE_MODE = process.env.SEMANTICS_UI_LIVE_MODE === 'true';
+const SRV_URL = (process.env.SEMANTICS_SRV_URL || 'http://localhost:3160').replace(/\/+$/, '');
+
+if (LIVE_MODE) {
+  // Health maps to the upstream's real /health (§2.1) and reports upstream status.
+  app.get('/api/health', async (_req, res) => {
+    try {
+      const up = await fetch(`${SRV_URL}/health`);
+      const body = await up.json();
+      res.status(up.ok ? 200 : 502).json({ ...body, upstream: SRV_URL, proxied: true });
+    } catch (err: any) {
+      res.status(503).json({ status: 'error', service: 'semantics-srv', upstream: SRV_URL, message: err?.message || 'upstream unreachable' });
+    }
+  });
+
+  // Generic proxy: registered BEFORE the seed routes below, so in live mode the
+  // in-process handlers are never reached. Endpoints the real backend does not
+  // implement (e.g. the hyphenated evidence joins) surface as upstream 404s —
+  // visible errors, never in-process seeded data.
+  app.use('/api', async (req, res) => {
+    try {
+      const url = new URL(req.originalUrl, SRV_URL);
+      const upstreamRes = await fetch(url.toString(), {
+        method: req.method,
+        headers: { 'Content-Type': 'application/json' },
+        body: ['GET', 'HEAD'].includes(req.method) ? undefined : JSON.stringify(req.body ?? {}),
+      });
+      const text = await upstreamRes.text();
+      res.status(upstreamRes.status);
+      const contentType = upstreamRes.headers.get('content-type');
+      if (contentType) res.type(contentType);
+      res.send(text);
+    } catch (err: any) {
+      res.status(502).json({
+        error: 'upstream_unreachable',
+        message: `semantics-srv at ${SRV_URL} is unreachable: ${err?.message || 'fetch failed'}`,
+      });
+    }
+  });
+}
+
 // ------------------- API ENDPOINTS ------------------- //
 
-// Health Endpoint (§2.1)
+// Health Endpoint (§2.1) — mock mode only (live mode registers its own above).
 app.get('/api/health', (req, res) => {
   res.json({
     status: 'ok',
