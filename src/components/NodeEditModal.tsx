@@ -1,9 +1,5 @@
 import React, { useState, useEffect } from 'react';
 import {
-  Concept,
-  OwningSubsystem,
-  RelationshipType,
-  Representation,
   Snapshot,
   SnapshotObservation,
   TableName,
@@ -17,8 +13,6 @@ import {
   CheckCircle2,
   AlertCircle,
   HelpCircle,
-  Clock,
-  Layers,
 } from 'lucide-react';
 
 interface NodeEditModalProps {
@@ -27,10 +21,6 @@ interface NodeEditModalProps {
   tableName: TableName;
   initialRow?: any; // If editing existing row
   writableParams: string[];
-  concepts: Concept[];
-  representations: Representation[];
-  subsystems: OwningSubsystem[];
-  relationshipTypes: RelationshipType[];
   snapshots: Snapshot[];
   observations: SnapshotObservation[];
   onSuccess: () => void;
@@ -43,10 +33,6 @@ export const NodeEditModal: React.FC<NodeEditModalProps> = ({
   tableName,
   initialRow,
   writableParams,
-  concepts,
-  representations,
-  subsystems,
-  relationshipTypes,
   snapshots,
   observations,
   onSuccess,
@@ -72,7 +58,7 @@ export const NodeEditModal: React.FC<NodeEditModalProps> = ({
         const colName = paramKey.replace(/^p_/, '');
         if (initialRow && initialRow[colName] !== undefined) {
           let val = initialRow[colName];
-          if (colName === 'raw_metadata' && typeof val === 'object') {
+          if ((colName === 'raw_metadata' || colName === 'metadata' || colName === 'canonical_key') && typeof val === 'object') {
             val = JSON.stringify(val, null, 2);
           }
           initialForm[paramKey] = val;
@@ -86,9 +72,6 @@ export const NodeEditModal: React.FC<NodeEditModalProps> = ({
       });
 
       // Special update extra params
-      if (tableName === 'owning_subsystem' && isEditMode) {
-        initialForm['p_new_id'] = initialRow.id;
-      }
       if (tableName === 'relationship_type' && isEditMode) {
         initialForm['p_new_name'] = initialRow.name;
       }
@@ -135,123 +118,50 @@ export const NodeEditModal: React.FC<NodeEditModalProps> = ({
     const colName = paramKey.replace(/^p_/, '');
     const val = formData[paramKey] ?? '';
 
-    // FK: concept_id or from_concept_id or to_concept_id
-    if (colName === 'concept_id' || colName === 'from_concept_id' || colName === 'to_concept_id') {
+    // FK: snapshot_id (snapshot_observation → snapshot)
+    if (colName === 'snapshot_id') {
       return (
         <select
           value={val}
           onChange={(e) => handleInputChange(paramKey, e.target.value)}
           className={`w-full px-3 py-2 text-xs rounded-lg border ${borderClass} bg-black/5 dark:bg-white/5 ${textPrimaryClass} focus:outline-hidden focus:ring-2 focus:ring-sky-500`}
         >
-          <option value="">Select Concept...</option>
-          {concepts.map((c) => (
-            <option key={c.id} value={c.id}>
-              {c.name} ({c.id.slice(0, 8)}...)
-            </option>
-          ))}
-        </select>
-      );
-    }
-
-    // FK: representation_id or from_representation_id or to_representation_id
-    if (colName === 'representation_id' || colName === 'from_representation_id' || colName === 'to_representation_id') {
-      return (
-        <select
-          value={val}
-          onChange={(e) => handleInputChange(paramKey, e.target.value)}
-          className={`w-full px-3 py-2 text-xs rounded-lg border ${borderClass} bg-black/5 dark:bg-white/5 ${textPrimaryClass} focus:outline-hidden focus:ring-2 focus:ring-sky-500`}
-        >
-          <option value="">Select Representation...</option>
-          {representations.map((r) => (
-            <option key={r.id} value={r.id}>
-              {r.label} ({r.schema_name}.{r.table_name})
-            </option>
-          ))}
-        </select>
-      );
-    }
-
-    // FK: owning_subsystem_id
-    if (colName === 'owning_subsystem_id') {
-      return (
-        <select
-          value={val}
-          onChange={(e) => handleInputChange(paramKey, e.target.value)}
-          className={`w-full px-3 py-2 text-xs rounded-lg border ${borderClass} bg-black/5 dark:bg-white/5 ${textPrimaryClass} focus:outline-hidden focus:ring-2 focus:ring-sky-500`}
-        >
-          <option value="">Select Subsystem...</option>
-          {subsystems.map((s) => (
+          <option value="">Select Snapshot...</option>
+          {snapshots.map((s) => (
             <option key={s.id} value={s.id}>
-              #{s.id} - {s.name}
+              {s.label} (v{s.version})
             </option>
           ))}
         </select>
       );
     }
 
-    // FK: relationship_type
-    if (colName === 'relationship_type') {
-      return (
-        <select
-          value={val}
-          onChange={(e) => handleInputChange(paramKey, e.target.value)}
-          className={`w-full px-3 py-2 text-xs rounded-lg border ${borderClass} bg-black/5 dark:bg-white/5 ${textPrimaryClass} focus:outline-hidden focus:ring-2 focus:ring-sky-500 font-mono`}
-        >
-          <option value="">Select Vocabulary Type...</option>
-          {relationshipTypes.map((rt) => (
-            <option key={rt.name} value={rt.name}>
-              {rt.name}
-            </option>
-          ))}
-        </select>
-      );
-    }
-
-    // Path selection: green / red
-    if (colName === 'path') {
+    // FK: observation_id (drift_finding → snapshot_observation)
+    if (colName === 'observation_id') {
       return (
         <select
           value={val}
           onChange={(e) => handleInputChange(paramKey, e.target.value)}
           className={`w-full px-3 py-2 text-xs rounded-lg border ${borderClass} bg-black/5 dark:bg-white/5 ${textPrimaryClass} focus:outline-hidden focus:ring-2 focus:ring-sky-500`}
         >
-          <option value="">None / Default</option>
-          <option value="green">Green Path (Validated / Active)</option>
-          <option value="orange">Orange Path (Warning / Review)</option>
-          <option value="red">Red Path (Drift / Flagged)</option>
+          <option value="">Select Observation...</option>
+          {observations.map((o) => (
+            <option key={o.id} value={o.id}>
+              {o.lifecycle_state} ({o.id.slice(0, 8)}...)
+            </option>
+          ))}
         </select>
       );
     }
 
-    // Confidence: number slider / input
-    if (colName === 'confidence') {
-      return (
-        <div className="flex items-center gap-3">
-          <input
-            type="number"
-            min="0"
-            max="1"
-            step="0.01"
-            value={val}
-            onChange={(e) => handleInputChange(paramKey, e.target.value)}
-            className={`w-28 px-3 py-2 text-xs rounded-lg border ${borderClass} bg-black/5 dark:bg-white/5 ${textPrimaryClass} font-mono`}
-            placeholder="0.95"
-          />
-          <span className="text-xs text-sky-400 font-mono">
-            {val !== '' && !isNaN(parseFloat(val)) ? `${Math.round(parseFloat(val) * 100)}% Confidence` : ''}
-          </span>
-        </div>
-      );
-    }
-
-    // JSONB metadata
-    if (colName === 'raw_metadata') {
+    // JSONB metadata / canonical key
+    if (colName === 'raw_metadata' || colName === 'metadata' || colName === 'canonical_key' || colName === 'subject_ref' || colName === 'object_value') {
       return (
         <textarea
           rows={3}
           value={val}
           onChange={(e) => handleInputChange(paramKey, e.target.value)}
-          placeholder='{"key": "value", "partitionKey": "tenant_id"}'
+          placeholder='{"key": "value"}'
           className={`w-full px-3 py-2 text-xs font-mono rounded-lg border ${borderClass} bg-black/5 dark:bg-white/5 ${textPrimaryClass} focus:outline-hidden focus:ring-2 focus:ring-sky-500`}
         />
       );
@@ -274,7 +184,7 @@ export const NodeEditModal: React.FC<NodeEditModalProps> = ({
     }
 
     // Textarea for descriptions or notes
-    if (colName === 'description' || colName === 'notes' || colName === 'evidence_notes') {
+    if (colName === 'description' || colName === 'notes' || colName === 'comment' || colName === 'excerpt') {
       return (
         <textarea
           rows={2}
@@ -356,18 +266,6 @@ export const NodeEditModal: React.FC<NodeEditModalProps> = ({
 
         {/* Dynamic Parameter Form */}
         <form onSubmit={handleSubmit} className="space-y-3">
-          {tableName === 'owning_subsystem' && isEditMode && (
-            <div className="space-y-1">
-              <label className="text-[11px] font-mono text-sky-400 font-semibold">p_new_id (Required for subsystem)</label>
-              <input
-                type="number"
-                value={formData['p_new_id'] ?? ''}
-                onChange={(e) => handleInputChange('p_new_id', e.target.value)}
-                className={`w-full px-3 py-2 text-xs rounded-lg border ${borderClass} bg-black/5 dark:bg-white/5 ${textPrimaryClass}`}
-              />
-            </div>
-          )}
-
           {tableName === 'relationship_type' && isEditMode && (
             <div className="space-y-1">
               <label className="text-[11px] font-mono text-sky-400 font-semibold">p_new_name (Required for relationship vocabulary)</label>

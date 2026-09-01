@@ -1,84 +1,12 @@
 export type Theme = 'light' | 'dark' | 'steel';
 
-export interface OwningSubsystem {
-  id: number;
-  name: string;
-  description: string;
-  path?: string;
-  created_at?: string;
-  expired_at: string | null;
-  superseded_id?: number | string;
-}
-
-export interface Concept {
-  id: string;
-  name: string;
-  description: string;
-  created_at?: string;
-  expired_at: string | null;
-  superseded_id?: string;
-}
-
-export interface Representation {
-  id: string;
-  concept_id: string;
-  label: string;
-  schema_name?: string;
-  table_name?: string;
-  owning_subsystem_id: number;
-  owner?: string;
-  raw_metadata?: Record<string, any>;
-  created_at?: string;
-  expired_at: string | null;
-  superseded_id?: string;
-}
-
-export interface RepresentationRelationship {
-  id: string;
-  from_representation_id: string;
-  to_representation_id: string;
-  relationship_type: string;
-  notes?: string;
-  evidence_source?: string;
-  evidence_type?: string;
-  confidence?: number;
-  evidence_notes?: string;
-  created_at?: string;
-  expired_at: string | null;
-  superseded_id?: string;
-}
-
-export interface ConsumerOperation {
-  id: string;
-  representation_id: string;
-  consumer_name: string;
-  operation: string;
-  notes?: string;
-  created_at?: string;
-  expired_at: string | null;
-  superseded_id?: string;
-}
-
-export interface IdentityStrategy {
-  id: string;
-  concept_id: string;
-  canonical_key_description: string;
-  notes?: string;
-  created_at?: string;
-  expired_at: string | null;
-  superseded_id?: string;
-}
-
-export interface RepresentationIdentity {
-  id: string;
-  representation_id: string;
-  identity_strategy_id: string;
-  identity_expression: string;
-  notes?: string;
-  created_at?: string;
-  expired_at: string | null;
-  superseded_id?: string;
-}
+// Retired with the ontology tables (cutover reconciliation, record
+// f3320458): owning_subsystem, concept, representation,
+// representation_relationship, consumer_operation, identity_strategy,
+// representation_identity, concept_relationship, execution_claim —
+// owned by resolution.* as the evaluation model. The UI now serves the
+// converged sol.semantics shape (+ canonical_asset pending the ownership
+// decision).
 
 export interface Snapshot {
   id: string;
@@ -113,22 +41,6 @@ export interface DriftFinding {
   description: string;
   severity: 'low' | 'medium' | 'high' | 'critical' | string;
   resolved_at: string | null;
-  created_at?: string;
-  expired_at: string | null;
-  superseded_id?: string;
-}
-
-export interface ConceptRelationship {
-  id: string;
-  from_concept_id: string;
-  to_concept_id: string;
-  relationship_type: string;
-  path?: 'green' | 'red' | 'orange' | string | null;
-  notes?: string;
-  evidence_source?: string;
-  evidence_type?: string;
-  confidence?: number;
-  evidence_notes?: string;
   created_at?: string;
   expired_at: string | null;
   superseded_id?: string;
@@ -175,7 +87,13 @@ export interface EvidenceItem {
 export interface StatementEvidence {
   id: string;
   evidence_item_id: string;
-  statement_type: 'concept_relationship' | 'representation_relationship' | string;
+  statement_type:
+    | 'source_observation'
+    | 'concept_relationship'
+    | 'representation_relationship'
+    | 'execution_claim'
+    | 'resolution_proposition'
+    | string;
   statement_id: string;
   role: string;
   strength?: number;
@@ -202,42 +120,19 @@ export interface FormattedEvidenceItem {
   expiredAt: string | null;
 }
 
-export interface RelationshipEvidenceResponse {
-  relationship: {
-    id: string;
-    fromConceptId?: string;
-    toConceptId?: string;
-    fromRepresentationId?: string;
-    toRepresentationId?: string;
-    relationshipType: string;
-    path?: string;
-    notes?: string;
-  };
-  evidence: Array<{
-    statementEvidenceId: string;
-    role: string;
-    strength?: number | null;
-    comment?: string | null;
-    evidenceItem: FormattedEvidenceItem;
-  }>;
-}
-
 export type TableName =
-  | 'owning_subsystem'
-  | 'concept'
-  | 'representation'
-  | 'representation_relationship'
-  | 'consumer_operation'
-  | 'identity_strategy'
-  | 'representation_identity'
   | 'snapshot'
   | 'snapshot_observation'
   | 'drift_finding'
-  | 'concept_relationship'
   | 'relationship_type'
   | 'evidence_type'
   | 'evidence_item'
-  | 'statement_evidence';
+  | 'statement_evidence'
+  | 'canonical_asset'
+  | 'asset_revision'
+  | 'source_observation'
+  | 'asset_identity_claim'
+  | 'asset_relation';
 
 export interface ListResponse<T> {
   table: string;
@@ -269,20 +164,12 @@ export interface MetaResponse {
 
 export interface FilterState {
   searchQuery: string;
-  selectedSubsystemId: number | 'all';
-  selectedRelType: string | 'all';
   includeExpired: boolean;
-  minConfidence: number;
-  pathFilter: 'all' | 'green' | 'red' | 'orange';
-  driftSeverityFilter: 'all' | 'low' | 'medium' | 'high' | 'critical';
 }
 
 export type ActiveTab =
-  | 'graph'
   | 'tables'
   | 'evidence'
   | 'snapshots_drift'
   | 'schema_meta'
   | 'api_sandbox';
-
-export type GraphViewMode = 'concept' | 'representation' | 'subsystem_map';

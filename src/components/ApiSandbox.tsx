@@ -48,7 +48,6 @@ export const ApiSandbox: React.FC = () => {
     { label: 'GET /api/evidence-type', method: 'GET', path: '/api/evidence-type', body: '' },
     { label: 'GET /api/evidence-item', method: 'GET', path: '/api/evidence-item?origin=harvested', body: '' },
     { label: 'GET /api/statement-evidence', method: 'GET', path: '/api/statement-evidence', body: '' },
-    { label: 'GET Concept Evidence', method: 'GET', path: '/api/concept-relationship/crel_1/evidence', body: '' },
     {
       label: 'POST /api/evidence-type',
       method: 'POST',
