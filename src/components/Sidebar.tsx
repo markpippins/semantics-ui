@@ -2,6 +2,7 @@ import React from 'react';
 import { ActiveTab, TableMetaItem, TableName } from '../types';
 import { useTheme } from '../context/ThemeContext';
 import {
+  Network,
   Table,
   Layers,
   Code2,
@@ -39,6 +40,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
   const { cardBgClass, borderClass, textPrimaryClass, textSecondaryClass } = useTheme();
 
   const mainNavItems = [
+    { id: 'graph' as ActiveTab, label: 'Graph Explorer', icon: Network, badge: 'Interactive' },
     { id: 'tables' as ActiveTab, label: 'Table Inspector', icon: Table, badge: `${tablesMeta.length} Tables` },
     { id: 'evidence' as ActiveTab, label: 'Evidence Explorer', icon: FileText },
     { id: 'snapshots_drift' as ActiveTab, label: 'Snapshots & Drift', icon: Layers, countBadge: unresolvedDriftCount },
