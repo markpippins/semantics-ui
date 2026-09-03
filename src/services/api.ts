@@ -94,6 +94,16 @@ export async function resolveDriftFinding(
   return handleResponse<{ id: string; resolved: number }>(res);
 }
 
+export async function fetchConceptRelationshipEvidence(id: string) {
+  const res = await fetch(`/api/concept-relationship/${encodeURIComponent(id)}/evidence`);
+  return handleResponse<import('../types').RelationshipEvidenceResponse>(res);
+}
+
+export async function fetchRepresentationRelationshipEvidence(id: string) {
+  const res = await fetch(`/api/representation-relationship/${encodeURIComponent(id)}/evidence`);
+  return handleResponse<import('../types').RelationshipEvidenceResponse>(res);
+}
+
 export async function fetchEvidenceItems(paramsObj: {
   evidenceType?: string;
   origin?: string;
