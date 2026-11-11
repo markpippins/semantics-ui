@@ -272,3 +272,4 @@ export type ActiveTab =
   | 'api_sandbox';
 
 export type GraphViewMode = 'concept' | 'representation' | 'subsystem_map';
+export type GraphLayoutMode = 'organic' | 'grid';
